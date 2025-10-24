@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HRIS Chooser — Interactive</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root { --bg:#f8fafc; --muted:#6b7280; --line:#e5e7eb; --card:#fff; --chip:#eef2ff; --ink:#111827; --brand:#111827; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:linear-gradient(var(--bg),#fff); color:var(--ink); }
+    .wrap { max-width:1100px; margin:0 auto; padding:24px; }
+    .header { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; align-items:center; }
+    .muted { color:var(--muted); }
+    .card { border:1px solid var(--line); background:var(--card); border-radius:16px; padding:16px; }
+    .btn { padding:10px 16px; border-radius:12px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+    .btn.primary { background:var(--brand); color:#fff; border-color:var(--brand); }
+    .btn.ghost { background:#fff; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .input { flex:1; min-width:280px; padding:12px 14px; border-radius:12px; border:1px solid var(--line); }
+    .row { display:grid; grid-template-columns:180px 1fr; gap:12px; padding:6px 0; }
+    .vendor { border:1px solid var(--line); border-radius:16px; padding:16px; background:#fff; }
+    .vendor-head { display:grid; grid-template-columns:1.2fr .6fr 1fr 1fr; gap:12px; align-items:center; }
+    .chip { display:inline-flex; align-items:center; gap:6px; background:var(--chip); border:1px solid #dbeafe; padding:6px 10px; border-radius:999px; font-size:12px; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media (max-width:900px){ .vendor-head{grid-template-columns:1fr 1fr;} .grid-2{grid-template-columns:1fr;} .row{grid-template-columns:1fr;} }
+    code.kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding:2px 6px; border:1px solid var(--line); border-radius:6px; background:#f3f4f6; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    // Helpers
+    const FX = { USD:1, EUR:1.08, GBP:1.28 };
+    const clamp01 = n => Math.max(0, Math.min(1, n));
+    const fmtUSD = n => new Intl.NumberFormat(undefined, { style:"currency", currency:"USD", maximumFractionDigits:0 }).format(n);
+    const toUSD = (amount, currency="USD") => amount * (FX[currency] ?? 1);
+    const fmtBy = (currency, amount) => new Intl.NumberFormat(undefined, { style:"currency", currency:currency||"USD", maximumFractionDigits:0 }).format(amount);
+
+    // Demo vendors
+    const DEMO_VENDORS = [
+      {
+        id:"hibob", name:"HiBob", website:"https://www.hibob.com",
+        features:{ coreHR:true, payroll:{ supported:true, countries:15, native:false }, timeAttendance:true, talentATS:false, performance:true, learning:false },
+        integrations:{ finance:["NetSuite","Xero"], sso:["Okta","AzureAD","Google"], identity:true, slack:true, teams:true, hrisAPIs:true, webhooks:true, etl:true },
+        global:{ countriesSupported:60, payrollCountries:15 },
+        compliance:{ gdpr:true, soc2:true, iso27001:true, dataResidencyEU:true },
+        ux:{ adminEase:4, employeeApp:4 },
+        implementation:{ months:3, partnerNetwork:true },
+        pricing:{ perEmployeePerMonth:10, currency:"USD", hiddenCostsEstimatePct:20 },
+        reporting:{ dashboards:4, customReports:true },
+        notes:["Strong mid-market core HR","Rich integrations","Great UX"],
+      },
+      {
+        id:"personio", name:"Personio", website:"https://www.personio.com",
+        features:{ coreHR:true, payroll:{ supported:true, countries:8, native:true }, timeAttendance:true, talentATS:true, performance:true, learning:false },
+        integrations:{ finance:["DATEV","Xero"], sso:["Okta","AzureAD","Google"], identity:true, slack:true, teams:true, hrisAPIs:true, webhooks:true, etl:true },
+        global:{ countriesSupported:40, payrollCountries:8 },
+        compliance:{ gdpr:true, soc2:true, iso27001:true, dataResidencyEU:true },
+        ux:{ adminEase:4, employeeApp:4 },
+        implementation:{ months:2, partnerNetwork:true },
+        pricing:{ perEmployeePerMonth:8, currency:"EUR", hiddenCostsEstimatePct:15 },
+        reporting:{ dashboards:4, customReports:true },
+        notes:["Strong in EU payroll","Good ATS built-in","Fast implementation"],
+      }
+    ];
+
+    // Parsing
+    function parseNeeds(text) {
+      const t=(text||"").toLowerCase();
+      return {
+        modules:{
+          payroll:/\bpayroll|compensation/.test(t),
+          ats:/\bats\b|applicant tracking|recruit/.test(t),
+          time:/time tracking|attendance|timesheet/.test(t),
+        },
+        integrations:{
+          sso:/\bsso\b|okta|azure|google workspace|gsuite/.test(t),
+          finance:/netsuite|sap|oracle|xero|quickbooks|datev/.test(t),
+        },
+        compliance:{
+          gdpr:/\bgdpr\b/.test(t),
+          soc2:/soc\s*2/.test(t),
+          iso:/iso\s*27001/.test(t),
+        },
+        regions:{
+          eu:/\beu(rope|)\b|european/.test(t),
+          us:/\bus\b|united states|usa/.test(t),
+          uk:/\buk\b|united kingdom|britain/.test(t),
+        },
+        budgetPEPM:(()=>{const m=t.match(/\$?€?(\d{1,3})\s*(per\s*employee|pepm|\/\s*user|\/\s*employee)/);return m?parseInt(m[1]):undefined;})(),
+        headcount:(()=>{const m=t.match(/(\d{2,5})\s*(employees|people|heads|users)?/);return m?parseInt(m[1]):undefined;})(),
+      };
+    }
+
+    // Scoring
+    function scoreVendor(v, needs) {
+      const core=v.features.coreHR?1:0;
+      const payroll=v.features.payroll.supported?clamp01(v.features.payroll.countries/100):0;
+      const time=v.features.timeAttendance?1:0;
+      const talent=clamp01((v.features.talentATS?0.45:0)+(v.features.performance?0.35:0)+(v.features.learning?0.2:0));
+      const basePEPM=toUSD(v.pricing.perEmployeePerMonth,v.pricing.currency);
+      const tco=basePEPM*(1+v.pricing.hiddenCostsEstimatePct/100);
+      const pricing=clamp01(1 - tco/40);
+      // Weighting
+      const weights={core:1, time:0.6, talent:0.8, pricing:1};
+      if(needs.modules.payroll) weights.core+=.2;
+      if(needs.modules.time) weights.time+=.2;
+      if(needs.modules.ats) weights.talent+=.2;
+      const sum=Object.values(weights).reduce((a,b)=>a+b,0);
+      const composite=(weights.core*(0.6*core+0.4*payroll)+weights.time*time+weights.talent*talent+weights.pricing*pricing)/sum;
+      return { fit:clamp01(composite), tcoPEPM:tco };
+    }
+
+    function Chip({children}){ return <span className="chip">{children}</span>; }
+
+    function VendorRow({ v, s, onToggle, expanded }){
+      return <div className="vendor">
+        <div className="vendor-head">
+          <div>
+            <div style={{fontWeight:700,fontSize:18}}><a href={v.website} target="_blank" rel="noreferrer">{v.name}</a></div>
+            <div className="muted" style={{fontSize:12}}>TCO est: {fmtUSD(s.tcoPEPM)}/employee/month</div>
+          </div>
+          <div><div style={{fontWeight:800,fontSize:22}}>{Math.round(s.fit*100)}%</div><div className="muted" style={{fontSize:12}}>Overall fit</div></div>
+          <div className="muted" style={{fontSize:14}}><b>Price:</b> {fmtBy(v.pricing.currency, v.pricing.perEmployeePerMonth)} base</div>
+          <div style={{textAlign:"right"}}><button className="btn" onClick={onToggle}>{expanded?"Hide details ▲":"Expand details ▼"}</button></div>
+        </div>
+        {expanded && <div className="grid-2" style={{marginTop:16}}>
+          <div className="card">
+            <div style={{fontWeight:600, marginBottom:8}}>Capabilities</div>
+            <div className="row"><div className="muted">Core HR & Payroll</div><div>{v.features.coreHR?"Core HR":"—"} • {v.features.payroll.supported?`Payroll (${v.features.payroll.countries} countries${v.features.payroll.native?", native":""})`:"No payroll"}</div></div>
+            <div className="row"><div className="muted">Time & Attendance</div><div>{v.features.timeAttendance?"Built-in":"Add-on/None"}</div></div>
+            <div className="row"><div className="muted">Talent</div><div>{v.features.talentATS?"ATS":""}{v.features.performance?", Performance":""}{v.features.learning?", Learning":""}</div></div>
+          </div>
+          <div className="card">
+            <div style={{fontWeight:600, marginBottom:8}}>Integrations & Compliance</div>
+            <div className="row"><div className="muted">Finance</div><div>{v.integrations.finance.join(", ")||"—"}</div></div>
+            <div className="row"><div className="muted">SSO</div><div>{v.integrations.sso.join(", ")||"—"}</div></div>
+            <div className="row"><div className="muted">Compliance</div><div>{v.compliance.gdpr?"GDPR":""}{v.compliance.soc2?", SOC2":""}{v.compliance.iso27001?", ISO27001":""}</div></div>
+          </div>
+        </div>}
+      </div>;
+    }
+
+    function App(){
+      const [text, setText] = useState("");
+      const [applied, setApplied] = useState(null);
+      const [expanded, setExpanded] = useState({});
+
+      const parsed = useMemo(()=>parseNeeds(text),[text]);
+      const appliedNeeds = applied ?? parsed; // if none applied yet, show live parse
+
+      const filtered = useMemo(()=>{
+        return DEMO_VENDORS.filter(v=>{
+          if(appliedNeeds.modules.payroll && !v.features.payroll.supported) return false;
+          if(appliedNeeds.modules.ats && !v.features.talentATS) return false;
+          if(appliedNeeds.modules.time && !v.features.timeAttendance) return false;
+          if(appliedNeeds.integrations.sso && v.integrations.sso.length===0) return false;
+          if(appliedNeeds.integrations.finance && v.integrations.finance.length===0) return false;
+          if(appliedNeeds.compliance.gdpr && !v.compliance.gdpr) return false;
+          return true;
+        }).map(v=>({v, s:scoreVendor(v, appliedNeeds)}))
+          .sort((a,b)=>b.s.fit-a.s.fit);
+      },[appliedNeeds]);
+
+      const onApply = () => setApplied(parsed);
+      const onKeyDown = (e) => { if(e.key === "Enter"){ onApply(); } };
+
+      return <div className="wrap">
+        <header className="header">
+          <div>
+            <h1 style={{margin:0}}>HRIS Chooser</h1>
+            <p className="muted" style={{margin:"4px 0 0"}}>Type your needs then hit <code class="kbd">Enter</code> or click <b>Apply</b>.</p>
+          </div>
+          <div className="toolbar">
+            <button className="btn primary" onClick={onApply}>Apply</button>
+            <button className="btn ghost" onClick={()=>setApplied(null)}>Clear</button>
+          </div>
+        </header>
+
+        <section className="card" style={{marginBottom:16}}>
+          <div style={{display:"flex", gap:8, alignItems:"center"}}>
+            <input className="input" value={text} onChange={e=>setText(e.target.value)} onKeyDown={onKeyDown}
+              placeholder="e.g., 500 employees in EU, expanding to US; need payroll + ATS; Okta SSO; budget 12 pepm; fast implementation" />
+            <button className="btn" onClick={onApply}>Apply</button>
+          </div>
+          <div style={{marginTop:10, display:"flex", gap:6, flexWrap:"wrap"}}>
+            {parsed.modules.payroll && <Chip>Payroll</Chip>}
+            {parsed.modules.ats && <Chip>ATS</Chip>}
+            {parsed.modules.time && <Chip>Time</Chip>}
+            {parsed.integrations.sso && <Chip>SSO</Chip>}
+            {parsed.integrations.finance && <Chip>Finance integrations</Chip>}
+            {parsed.compliance.gdpr && <Chip>GDPR</Chip>}
+            {parsed.compliance.soc2 && <Chip>SOC2</Chip>}
+            {parsed.compliance.iso && <Chip>ISO27001</Chip>}
+            {parsed.budgetPEPM && <Chip>Budget ≤ {fmtUSD(parsed.budgetPEPM)}</Chip>}
+            {parsed.headcount && <Chip>Headcount ≈ {parsed.headcount}</Chip>}
+            {!parsed.modules.payroll && !parsed.modules.ats && !parsed.modules.time && !parsed.integrations.sso && !parsed.integrations.finance && !parsed.compliance.gdpr && !parsed.compliance.soc2 && !parsed.compliance.iso && <span className="muted">No specific needs detected yet.</span>}
+          </div>
+          {applied && <div className="muted" style={{marginTop:8}}>Applied filters are active. Click <b>Clear</b> to go back to live parsing.</div>}
+        </section>
+
+        <section>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline"}}>
+            <h2 style={{margin:"0 0 8px"}}>Results</h2>
+            <div className="muted">{filtered.length} match{filtered.length!==1?"es":""}</div>
+          </div>
+          <div style={{display:"grid", gap:12}}>
+            {filtered.length===0 && <div className="muted">No vendors matched the filters.</div>}
+            {filtered.map(({v,s})=>
+              <VendorRow key={v.id} v={v} s={s} expanded={!!expanded[v.id]} onToggle={()=>setExpanded(prev=>({...prev,[v.id]:!prev[v.id]}))} />
+            )}
+          </div>
+        </section>
+      </div>;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
